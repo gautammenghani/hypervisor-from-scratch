@@ -1,0 +1,14 @@
+gmh.ko  
+gmh.mod  
+gmh.mod.c  
+gmh.mod.o  
+gmh.o 
+modules.order  
+Module.symvers
+.Module.symvers.cmd
+.gmh.ko.cmd
+.gmh.mod.cmd
+.gmh.mod.o.cmd
+.gmh.o.cmd
+.modules.order.cmd
+
