@@ -4,6 +4,7 @@
 #include <asm/processor.h>
 #include <asm/cpufeatures.h>
 #include <asm/cpufeature.h>
+#include <asm/msr.h>
 struct cpuinfo_x86 cpu;
 
 MODULE_LICENSE("Dual BSD/GPL");
@@ -40,6 +41,8 @@ struct file_operations gmh_fops = {
 static int __init gmh_init(void)
 {
 	char *vendor_name;
+	int erri, efer;
+
 	if (register_chrdev(gmh_major, "gmh", &gmh_fops) < 0) {
 		pr_debug("cannot obtain major number: %d\n", gmh_major);
 	}
@@ -47,17 +50,22 @@ static int __init gmh_init(void)
 	vendor_name = cpu.x86_vendor_id;
 	pr_warn("Vendor name :  %s\n", vendor_name);
 
-	#ifdef CONFIG_X86_VMX_FEATURE_NAMES
-	if (!strncmp (vendor_name, "AuthenticAMD", strlen(vendor_name)))
-		pr_warn("SVM supported? :  %s\n", test_cpu_cap(&cpu, X86_FEATURE_SVM) == 1?"Yes":"No");
-	
+	if (!strncmp (vendor_name, "AuthenticAMD", strlen(vendor_name))) {
+		pr_warn("SVM supported? :  %s\n", boot_cpu_has(X86_FEATURE_SVM) == 1?"Yes":"No");
+		rdmsrl(MSR_EFER, efer);
+		if (efer & EFER_SVME)
+			pr_warn("EFER_SVME is already set\n");
+		else {
+			pr_warn("not busy: %d\n", efer);
+			//err = svm_hardware_enable();			
+			wrmsrl(MSR_EFER, efer | EFER_SVME);
+			rdmsrl(MSR_EFER, efer);
+		}
+	}
 	else if (!strncmp (vendor_name, "GenuineIntel", strlen(vendor_name)))
-		pr_warn("VMX supported? :  %s\n", test_cpu_cap(&cpu, X86_FEATURE_VMX) == 1?"Yes":"No");
+		pr_warn("VMX supported? :  %s\n", boot_cpu_has(X86_FEATURE_VMX) == 1?"Yes":"No");
 	else
-		pr_warn("Unknown CPU\n");
-	#else
-	pr_warn("Virtualization is not supported\n");
-	#endif
+		pr_warn("Virtualization is not supported\n");
 	return 0;
 }
 
