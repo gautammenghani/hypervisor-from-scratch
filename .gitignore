@@ -13,3 +13,6 @@ Module.symvers
 .modules.order.cmd
 TODO
 notes.txt
+a.out
+load.sh
+test.c
