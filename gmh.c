@@ -91,21 +91,20 @@ struct file_operations gmh_fops = {
 	.unlocked_ioctl = gmh_ioctl
 };
 
-static void hello(void) 
+static void enable_svme_bit (void *data)
 {
-	pr_debug("hello boi\n");
+	int efer;
+
+	rdmsrl(MSR_EFER, efer);
+	wrmsrl(MSR_EFER, (efer | EFER_SVME));
 }
 
-static void gmh_runoneach_logical_processor (long (*fptr)(void))
+static void disable_svme_bit (void *data)
 {
-	int each_cpu, ret;
+	int efer;
 
-	// TODO: see if on_each_cpu can be used
-	for_each_present_cpu(each_cpu) {
-		set_cpus_allowed_ptr(current, cpumask_of(each_cpu));
-		pr_debug("hello() running for cpu: %d, ret: %d\n", smp_processor_id(), ret);
-		fptr();
-	}
+	rdmsrl(MSR_EFER, efer);
+	wrmsrl(MSR_EFER, (efer & ~EFER_SVME));
 }
 
 static int __init gmh_init(void)
@@ -141,16 +140,14 @@ static int __init gmh_init(void)
 	cls = class_create(THIS_MODULE, "gmh");
 	device_create(cls, NULL, MKDEV(gmh_major, 0), NULL, "gmh");
 
-	//gmh_runoneach_logical_processor(hello);
+	on_each_cpu(enable_svme_bit, NULL, 1);
 	run_vmrun(NULL);
 	return 0;
 }
 
 static void __exit gmh_exit(void)
 {
-	int efer;
-	rdmsrl(MSR_EFER, efer);
-	wrmsrl(MSR_EFER, (efer & ~EFER_SVME));
+	on_each_cpu(disable_svme_bit, NULL, 1);
 	device_destroy(cls, MKDEV(gmh_major, 0));
         class_destroy(cls);
 	unregister_chrdev(gmh_major, "gmh");
@@ -159,3 +156,4 @@ static void __exit gmh_exit(void)
 
 module_init(gmh_init);
 module_exit(gmh_exit);
+

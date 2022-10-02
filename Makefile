@@ -13,4 +13,3 @@ ins:
 
 rem:
 	sudo rmmod gmh
-	sudo wrmsr -a 0xc0000080 0xd01
