@@ -12,7 +12,6 @@ Module.symvers
 .gmh.o.cmd
 .modules.order.cmd
 TODO
-notes.txt
 a.out
-load.sh
 test.c
+load.sh

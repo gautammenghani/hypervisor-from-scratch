@@ -5,15 +5,48 @@
 #include <asm/cpufeatures.h>
 #include <asm/cpufeature.h>
 #include <asm/msr.h>
+#include <asm/io.h>
 #include <linux/cpumask.h>
 #include <linux/device.h>
+#include <linux/sched.h>
+#include <linux/smp.h>
+#include <linux/slab.h>
+
+#define IOC_MAGIC k
+#define gmh_major 117
+
+#define WR_VALUE _IOW('a','a',int32_t*)
+#define RD_VALUE _IOR('a','b',int32_t*)
+
+typedef struct virtual_machine_state {
+	u64 vmcb_region;
+} vm_state, *pvm_state;
+
+extern vm_state *g_gueststate;
+
 struct cpuinfo_x86 cpu;
 static struct class *cls;
 
 MODULE_LICENSE("Dual BSD/GPL");
 
-#define gmh_major 117
+// VM FUNCS
+static bool run_vmrun(vm_state *guest_state)
+{
+	u64 *virt_buffer, phys_buffer;
+       
+	virt_buffer = (u64 *)(kmalloc (sizeof(u8)*4096, GFP_KERNEL));
+	if (!virt_buffer) {
+		pr_err("Could not allocate memory for VMCB\n");
+		return false;
+	}
+	
+	phys_buffer = virt_to_phys(virt_buffer);
+	pr_debug("Virtual address: %p\n", virt_buffer);
+	pr_debug("Physical address: %lld\n", phys_buffer);
+	return true;
+}
 
+// FILE OPS FUNCS
 int gmh_open(struct inode *inode, struct file *filp)
 {
 	return 0;
@@ -34,12 +67,46 @@ ssize_t gmh_write(struct file *filp, const char *buf, size_t count, loff_t *f_po
         return 0;
 }
 
+static long gmh_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+         switch(cmd) {
+                case WR_VALUE:
+                                pr_debug("WR_Value\n");
+                        	break;
+                case RD_VALUE:
+                                pr_debug("RD_Value\n");
+                        break;
+                default:
+                        pr_info("Default\n");
+                        break;
+        }
+        return 0;
+}
+
 struct file_operations gmh_fops = {
         .read = gmh_read,
         .write = gmh_write,
         .open = gmh_open,
-        .release = gmh_release
+        .release = gmh_release,
+	.unlocked_ioctl = gmh_ioctl
 };
+
+static void hello(void) 
+{
+	pr_debug("hello boi\n");
+}
+
+static void gmh_runoneach_logical_processor (long (*fptr)(void))
+{
+	int each_cpu, ret;
+
+	// TODO: see if on_each_cpu can be used
+	for_each_present_cpu(each_cpu) {
+		set_cpus_allowed_ptr(current, cpumask_of(each_cpu));
+		pr_debug("hello() running for cpu: %d, ret: %d\n", smp_processor_id(), ret);
+		fptr();
+	}
+}
 
 static int __init gmh_init(void)
 {
@@ -74,6 +141,8 @@ static int __init gmh_init(void)
 	cls = class_create(THIS_MODULE, "gmh");
 	device_create(cls, NULL, MKDEV(gmh_major, 0), NULL, "gmh");
 
+	//gmh_runoneach_logical_processor(hello);
+	run_vmrun(NULL);
 	return 0;
 }
 

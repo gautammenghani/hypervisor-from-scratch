@@ -1,0 +1,7 @@
+1. Check if Virt is enabled : sudo rdmsr 0xC0000080 // 0xd01 & 0xc
+2. read from all cores: sudo rdmsr -a 0xc0000080
+3. write to reset : sudo wrmsr -a 0xc0000080 0xd01
+
+
+// INTEL -> AMD map
+1. VMXON -> VMRUN
