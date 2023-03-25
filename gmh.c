@@ -6,11 +6,13 @@
 #include <asm/cpufeature.h>
 #include <asm/msr.h>
 #include <asm/io.h>
+#include <asm/ptrace.h>
 #include <linux/cpumask.h>
 #include <linux/device.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/slab.h>
+#include <asm/tlbflush.h>
 
 #define IOC_MAGIC k
 #define gmh_major 117
@@ -91,26 +93,45 @@ struct file_operations gmh_fops = {
 	.unlocked_ioctl = gmh_ioctl
 };
 
-static void enable_svme_bit (void *data)
+static void enable_vmxon(void *data)
 {
-	int efer;
-
-	rdmsrl(MSR_EFER, efer);
-	wrmsrl(MSR_EFER, (efer | EFER_SVME));
+  cr4_set_bits(X86_CR4_VMXE);
+  pr_debug("CR4 - VMXON enabled\n");
 }
 
-static void disable_svme_bit (void *data)
+static void disable_vmxon(void *data)
 {
-	int efer;
+  cr4_clear_bits(X86_CR4_VMXE);
+  pr_debug("CR4 - VMXON disabled\n");
+}
 
-	rdmsrl(MSR_EFER, efer);
-	wrmsrl(MSR_EFER, (efer & ~EFER_SVME));
+static bool vmxon_bit_enabled(void)
+{
+	int msr_feat_ctrl;
+    rdmsrl(MSR_IA32_FEAT_CTL,msr_feat_ctrl);
+    pr_debug("MSR_feat_ctrol: %x\n", msr_feat_ctrl);
+    if (msr_feat_ctrl & FEAT_CTL_LOCKED){
+        if (!(msr_feat_ctrl & FEAT_CTL_VMX_ENABLED_OUTSIDE_SMX)) {
+            pr_warn("VMX not enabled in  BIOS\n");
+            return false;
+        }
+    }
+    // TODO: Set vmx bit in the msr if not set
+    return true;
+}
+
+static void setup_virt(void)
+{
+    if (!vmxon_bit_enabled()) {
+        pr_warn("VMX is disabled in BOIS\n");
+        return;
+    }
+	on_each_cpu(enable_vmxon, NULL, 1);
 }
 
 static int __init gmh_init(void)
 {
 	char *vendor_name;
-	int efer;
 
 	cpu = cpu_data(0);
 	vendor_name = cpu.x86_vendor_id;
@@ -118,20 +139,11 @@ static int __init gmh_init(void)
 
 	if (!strncmp (vendor_name, "AuthenticAMD", strlen(vendor_name))) {
 		pr_warn("SVM supported? :  %s\n", boot_cpu_has(X86_FEATURE_SVM) == 1?"Yes":"No");
-		rdmsrl(MSR_EFER, efer);
-		if (efer & EFER_SVME){
-			pr_warn("EFER_SVME is already set\n");
-			return -EBUSY;
-		}
-		else {
-			pr_warn("not busy: %d\n", efer);
-			//err = svm_hardware_enable();
-			wrmsrl(MSR_EFER, (efer | EFER_SVME));
-			pr_debug("EFER_SVME set successfully? %d\n", (efer&EFER_SVME)==1?1:0);
-		}
 	}
-	else if (!strncmp (vendor_name, "GenuineIntel", strlen(vendor_name)))
+	else if (!strncmp (vendor_name, "GenuineIntel", strlen(vendor_name))) {
 		pr_warn("VMX supported? :  %s\n", boot_cpu_has(X86_FEATURE_VMX) == 1?"Yes":"No");
+        setup_virt();
+    }
 	else
 		pr_warn("Virtualization is not supported\n");
 	if (register_chrdev(gmh_major, "gmh", &gmh_fops) < 0) {
@@ -139,17 +151,16 @@ static int __init gmh_init(void)
 	}
 	cls = class_create(THIS_MODULE, "gmh");
 	device_create(cls, NULL, MKDEV(gmh_major, 0), NULL, "gmh");
-
-	on_each_cpu(enable_svme_bit, NULL, 1);
-	run_vmrun(NULL);
+    
+	//run_vmrun(NULL);
 	return 0;
 }
 
 static void __exit gmh_exit(void)
 {
-	on_each_cpu(disable_svme_bit, NULL, 1);
+	on_each_cpu(disable_vmxon, NULL, 1);
 	device_destroy(cls, MKDEV(gmh_major, 0));
-        class_destroy(cls);
+    class_destroy(cls);
 	unregister_chrdev(gmh_major, "gmh");
 	pr_warn("exit called\n");
 }
