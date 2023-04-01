@@ -13,23 +13,53 @@
 #include <linux/smp.h>
 #include <linux/slab.h>
 #include <asm/tlbflush.h>
-
-#define IOC_MAGIC k
-#define gmh_major 117
-
-#define WR_VALUE _IOW('a','a',int32_t*)
-#define RD_VALUE _IOR('a','b',int32_t*)
-
-typedef struct virtual_machine_state {
-	u64 vmcb_region;
-} vm_state, *pvm_state;
-
-extern vm_state *g_gueststate;
+#include "gmh.h"
 
 struct cpuinfo_x86 cpu;
 static struct class *cls;
 
 MODULE_LICENSE("Dual BSD/GPL");
+
+static inline int vmxon(uint64_t phys)
+{
+	uint8_t ret;
+
+	__asm__ __volatile__ ("vmxon %[pa]; setna %[ret]"
+		: [ret]"=rm"(ret)
+		: [pa]"m"(phys)
+		: "cc", "memory");
+
+	return ret;
+}
+
+// Memory funcs
+bool allocate_vmxon_region(vm_state *guest_state)
+{
+    u64 *virt_buffer, physical_buffer;
+    int vmxon_size = 2 * VMXON_SIZE;
+    int ret, vmcs_region_id;
+    struct page *pages;
+
+    pages = alloc_pages(GFP_KERNEL, vmxon_size);
+    if (!pages){
+        pr_err("GMH: could not allocate memory for vmxon\n");
+        return false;
+    }
+    virt_buffer = (u64 *)page_address(pages);
+    physical_buffer = virt_to_phys(virt_buffer);
+    //memset(*physical_buffer, 0, sizeof(*physical_buffer));
+    pr_debug("GMH: physical buffer address: %lld\n", physical_buffer);
+    rdmsrl(MSR_IA32_VMX_BASIC, vmcs_region_id);
+    pr_debug("GMH: vmcs_region_id: %x\n", vmcs_region_id);
+    *(u64 *)virt_buffer = vmcs_region_id;
+    ret = vmxon(physical_buffer);
+    if (!ret) {
+        pr_err("GMH: vmxon operation failed: %d\n", ret);
+        return false;
+    }
+    guest_state->vmxon_region = physical_buffer;
+    return true;
+}
 
 // VM FUNCS
 static bool run_vmrun(vm_state *guest_state)
@@ -127,6 +157,8 @@ static void setup_virt(void)
         return;
     }
 	on_each_cpu(enable_vmxon, NULL, 1);
+    if (allocate_vmxon_region())
+        pr_warn("GMH: allocate_vmxon_region() failed\n");
 }
 
 static int __init gmh_init(void)
