@@ -45,12 +45,12 @@ static inline int vmptrld(uint64_t vmcs_pa)
 	return ret;
 }
 
-bool allocate_vmcs_region(vm_state guest_state)
+bool allocate_vmcs_region(vm_state *guest_state)
 {
     u64 physical_buffer;
-    int ret;
     unsigned long ia32_vmx_basic_msr;
-    uint64_t *vmcs_region;
+    uint8_t ret;
+    u8 *vmcs_region;
 
     vmcs_region = kzalloc(VMCS_SIZE, GFP_KERNEL);
     if (!vmcs_region){
@@ -59,25 +59,26 @@ bool allocate_vmcs_region(vm_state guest_state)
     }
     physical_buffer = __pa(vmcs_region);
     //memset(*physical_buffer, 0, sizeof(*physical_buffer));
-    pr_debug("GMH: physical buffer address: %lld\n", physical_buffer);
+    pr_debug("GMH: vmcs virtual address: 0x%llx\n", vmcs_region);
+    pr_debug("GMH: vmcs physical buffer address: 0x%llx\n", physical_buffer);
     rdmsrl(MSR_IA32_VMX_BASIC, ia32_vmx_basic_msr);
     *(uint32_t *)vmcs_region = ia32_vmx_basic_msr;
     ret = vmptrld(physical_buffer);
-    if (!ret) {
-        pr_err("GMH: vmxon operation failed: %d\n", ret);
+    if (ret){
+        pr_err("GMH: vmptrld operation failed: %d\n", ret);
         return false;
     }
-    guest_state.vmcs_region = physical_buffer;
+    guest_state->vmcs_region = physical_buffer;
     return true;
 }
 
 // Memory funcs
-bool allocate_vmxon_region(vm_state guest_state)
+bool allocate_vmxon_region(vm_state *guest_state)
 {
     u64 physical_buffer;
     int ret;
     unsigned long ia32_vmx_basic_msr;
-    uint64_t *vmxon_region;
+    u8 *vmxon_region;
 
     vmxon_region = kzalloc(VMXON_SIZE, GFP_KERNEL);
     if (!vmxon_region){
@@ -86,15 +87,16 @@ bool allocate_vmxon_region(vm_state guest_state)
     }
     physical_buffer = __pa(vmxon_region);
     //memset(*physical_buffer, 0, sizeof(*physical_buffer));
-    pr_debug("GMH: physical buffer address: %lld\n", physical_buffer);
+    pr_debug("GMH: vmxon virtual buffer address: 0x%llx\n", vmxon_region);
+    pr_debug("GMH: vmxon physical buffer address: 0x%llx\n", physical_buffer);
     rdmsrl(MSR_IA32_VMX_BASIC, ia32_vmx_basic_msr);
     *(u64 *)vmxon_region = ia32_vmx_basic_msr;
     ret = vmxon(physical_buffer);
-    if (!ret) {
+    if (ret) {
         pr_err("GMH: vmxon operation failed: %d\n", ret);
         return false;
     }
-    guest_state.vmxon_region = physical_buffer;
+    guest_state->vmxon_region = physical_buffer;
     return true;
 }
 
@@ -202,9 +204,9 @@ static long setup_virt_per_cpu(void *data)
     if (!vmxon_bit_enabled())
         return -1;
     enable_vmxon();
-    if (!allocate_vmxon_region(guest_state[cpu_id]))
+    if (!allocate_vmxon_region(&guest_state[cpu_id]))
         pr_warn("cannot allocate vmxon memory\n");
-    if (!allocate_vmcs_region(guest_state[cpu_id]))
+    if (!allocate_vmcs_region(&guest_state[cpu_id]))
         pr_warn("cannot allocate vmcs memory\n");
     
     return 0;
@@ -216,17 +218,26 @@ static void setup_virt(void)
 
     total_cpus = num_online_cpus();
     pr_debug("total cpus: %d\n", total_cpus);
-    guest_state = kmalloc(sizeof(vm_state) * total_cpus, GFP_KERNEL);
+    guest_state = kzalloc(sizeof(vm_state) * total_cpus, GFP_KERNEL);
+    if (!guest_state){
+        pr_err("guest_state buffer could not be allocated\n");
+        return;
+    }
     for_each_possible_cpu(cpu){
-        pr_debug("running on cpu: %d\n", cpu);
+        pr_debug("===== Setup on cpu: %d ========\n", cpu);
         work_on_cpu(cpu, setup_virt_per_cpu, NULL);
     }
 }
 
 static long clear_virt_setup_per_cpu(void *data)
 {
-    disable_vmxon();
+    int cpu_id; 
+
     vmxoff();
+    disable_vmxon();
+    cpu_id = smp_processor_id();
+    kfree(__va(guest_state[cpu_id].vmxon_region));
+    kfree(__va(guest_state[cpu_id].vmcs_region));
     return 0;
 }
 
@@ -237,6 +248,7 @@ static void clear_virt_setup(void)
     total_cpus = num_online_cpus();
     
     for_each_possible_cpu(cpu){
+        pr_debug("===== Destroy on cpu: %d ========\n", cpu);
         work_on_cpu(cpu, clear_virt_setup_per_cpu, NULL);
     }
     

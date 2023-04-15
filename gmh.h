@@ -12,12 +12,12 @@
 #define RD_VALUE _IOR('a','b',int32_t*)
 
 typedef struct virtual_machine_state {
-	u64 vmxon_region;
-    u64 vmcs_region;
+	u64 *vmxon_region;
+    u64 *vmcs_region;
 } vm_state, *pvm_state;
 
 vm_state *guest_state;
 
-bool allocate_vmxon_region(vm_state guest_state);
-bool allocate_vmcs_region(vm_state guest_state);
+bool allocate_vmxon_region(vm_state *guest_state);
+bool allocate_vmcs_region(vm_state *guest_state);
 #endif
