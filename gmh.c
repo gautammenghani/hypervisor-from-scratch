@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <asm/tlbflush.h>
 #include "gmh.h"
+#include "ept.h"
 
 struct cpuinfo_x86 cpu;
 static struct class *cls;
