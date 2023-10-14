@@ -2,7 +2,7 @@
 #include "ept.h"
 #include "gmh.h"
 
-u64 initialize_eptp () 
+ept_pml4e* initialize_eptp () 
 {
     int i;
 

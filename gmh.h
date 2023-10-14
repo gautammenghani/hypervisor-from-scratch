@@ -14,6 +14,11 @@
 typedef struct virtual_machine_state {
 	u64 *vmxon_region;
     u64 *vmcs_region;
+    u64 *eptp;
+    u64 vmm_stack;
+    u64 msr_bitmap;
+    u64 msr_bitmap_physical;
+        
 } vm_state, *pvm_state;
 
 vm_state *guest_state;

@@ -46,6 +46,54 @@ static inline int vmptrld(uint64_t vmcs_pa)
 	return ret;
 }
 
+static inline int vmptrst(void)
+{
+	uint64_t vmcspa = 0;
+    uint8_t ret;
+
+	__asm__ __volatile__ ("vmptrst %[value]; setna %[ret]"
+		: [ret]"=rm"(ret)
+		: [value]"m"(vmcspa)
+		: "cc", "memory");
+    if (ret!=0)
+        pr_warn("GMH: vmptrst failed : %d\n", ret);
+    pr_debug("GMH: Current VMCS ptr: 0x%llx\n", vmcspa);
+
+	return ret;
+}
+
+static inline int vmclear(uint64_t vmcs_pa) 
+{
+	uint8_t ret;
+
+	__asm__ __volatile__ ("vmclear %[pa]; setna %[ret]"
+		: [ret]"=rm"(ret)
+		: [pa]"m"(vmcs_pa)
+		: "cc", "memory");
+
+	return ret;
+}
+
+bool clear_vmcs_state(vm_state *guest_state)
+{
+    int ret = vmclear(guest_state->vmcs_region);
+	if (ret) {
+		pr_err("GMH: VMCS failed to clear with status : %d\n", ret);
+		return false;
+	}
+	return true;
+}
+
+bool load_vmcs(vm_state *guest_state)
+{
+	int ret = vmptrld(guest_state->vmcs_region);
+	if (ret){
+		pr_err("GMH: VMCS failed to load with status : %d\n", ret);
+		return false;
+	}
+	return true;
+}
+
 bool allocate_vmcs_region(vm_state *guest_state)
 {
     u64 physical_buffer;
@@ -200,7 +248,7 @@ static long setup_virt_per_cpu(void *data)
     int cpu_id;
 
     cpu_id = smp_processor_id();
-    pr_debug("setup_virt() running on cpu: %d\n", cpu_id);
+    pr_debug("initiate_vmx() running on cpu: %d\n", cpu_id);
     
     if (!vmxon_bit_enabled())
         return -1;
@@ -213,9 +261,10 @@ static long setup_virt_per_cpu(void *data)
     return 0;
 }
 
-static void setup_virt(void)
+static void initiate_vmx(void)
 {
     int cpu, total_cpus;
+	ept_pml4e eptp;
 
     total_cpus = num_online_cpus();
     pr_debug("total cpus: %d\n", total_cpus);
@@ -228,6 +277,15 @@ static void setup_virt(void)
         pr_debug("===== Setup on cpu: %d ========\n", cpu);
         work_on_cpu(cpu, setup_virt_per_cpu, NULL);
     }
+
+}
+
+static void setup_virt(void)
+{
+	pr_debug("======= Initializing EPT ==========");
+	eptp = initialize_eptp();
+	
+	initiate_vmx();
 }
 
 static long clear_virt_setup_per_cpu(void *data)
